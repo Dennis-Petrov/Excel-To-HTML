@@ -2,10 +2,13 @@
 using SautinSoft.Document;
 using SautinSoft.Document.Tables;
 
-const string ExcelToPdfSerialNumber = "...";
-const string DocumentNetSerialNumber = "...";
+const string ExcelToPdfSerialNumber = "50013243563";
+const string DocumentNetSerialNumber = "50024532950";
 const string FileName = "SampleDoc";
-const int DefaultMargin = 0;
+const int DefaultMargin = 10;
+const double DefaultLeftPadding = 2.0;
+const double DefaultPadding = 0.5;
+const int DefaultFontSize = 12;
 
 DocumentCore.Serial = DocumentNetSerialNumber;
 
@@ -36,8 +39,9 @@ async Task<byte[]> ConvertToPdfAsync()
     excelToPdf.PageStyle.PageMarginTop.mm(DefaultMargin);
     excelToPdf.PageStyle.PageMarginRight.mm(DefaultMargin);
     excelToPdf.PageStyle.PageMarginBottom.mm(DefaultMargin);
-    excelToPdf.PageStyle.PageOrientation.Auto();
-    excelToPdf.PageStyle.PageSize.Auto();
+    excelToPdf.PageStyle.PageOrientation.Landscape();
+    excelToPdf.PageStyle.PageScale.Auto();
+    excelToPdf.PageStyle.PageSize.A4();
 
     var pdf = excelToPdf.ConvertBytes(excel);
 
@@ -49,7 +53,6 @@ async Task<byte[]> ConvertToPdfAsync()
 async Task ConvertToHtmlAsync(byte[] pdf)
 {
     var document = LoadDocument(pdf);
-    var builder = new DocumentBuilder(document);
     var certificate = new PrintformCertificate
     {
         OrganizationName = "ООО \"Ромашка\"",
@@ -60,9 +63,10 @@ async Task ConvertToHtmlAsync(byte[] pdf)
         ValidFrom = DateTime.Now,
         ValidTo = DateTime.Now
     };
-    var sign = new Sign(certificate, DateTime.UtcNow, DateTime.UtcNow);
 
-    AddSignatureStamp(builder, sign);
+    var sign = new Sign(certificate, DateTime.Now, DateTime.Now);
+
+    AddSignature2(document, new[] { sign });
 
     using (var ms = new MemoryStream())
     {
@@ -82,89 +86,185 @@ DocumentCore LoadDocument(byte[] pdf)
     }
 }
 
-void AddSignatureStamp(DocumentBuilder builder, Sign sign)
+void AddSignature2(DocumentCore document, IReadOnlyList<Sign> signatures)
 {
-    builder.ParagraphFormat.KeepLinesTogether = true;
-    builder.ParagraphFormat.KeepWithNext = true;
-    builder.CellFormat.Borders.SetBorders(MultipleBorderTypes.Bottom, BorderStyle.None, Color.Blue, 1);
-    builder.Writeln();
-
-    builder.StartTable();
-
-    builder.TableFormat.PreferredWidth = new TableWidth(LengthUnitConverter.Convert(6.5, LengthUnit.Inch, LengthUnit.Point), TableWidthUnit.Point);
-    builder.TableFormat.Borders.SetBorders(MultipleBorderTypes.Outside, BorderStyle.Single, Color.Blue, 1);
-    builder.TableFormat.Alignment = HorizontalAlignment.Center;
-
-    builder.CellFormat.Padding = new Padding(0.5, 0.2, LengthUnit.Centimeter);
-    builder.CellFormat.VerticalAlignment = VerticalAlignment.Center;
-    builder.ParagraphFormat.Alignment = HorizontalAlignment.Left;
-
-    builder.RowFormat.Height = new TableRowHeight(5f, HeightRule.Exact);
-    builder.InsertCell();
-    builder.CellFormat.PreferredWidth = new TableWidth(LengthUnitConverter.Convert(1.8, LengthUnit.Inch, LengthUnit.Point), TableWidthUnit.Point);
-    builder.InsertCell();
-    builder.EndRow();
-
-    builder.RowFormat.Height = new TableRowHeight(18f, HeightRule.Exact);
-    builder.InsertCell();
-    builder.CharacterFormat.FontColor = Color.Blue;
-    builder.CharacterFormat.Size = 8;
-    builder.CharacterFormat.FontName = "Arial";
-    builder.Write("SignedWith");
-    builder.InsertCell();
-    builder.Write($"{sign.OrganizationName} {sign.Employee}");
-    builder.EndRow();
-
-    builder.RowFormat.Height = new TableRowHeight(18f, HeightRule.Exact);
-    builder.InsertCell();
-    builder.Write("Serial");
-    builder.InsertCell();
-    builder.Write(sign.SerialNumber);
-    builder.EndRow();
-
-    builder.RowFormat.Height = new TableRowHeight(18f, HeightRule.Exact);
-    builder.InsertCell();
-    builder.Write("ValidationPeriod");
-    builder.InsertCell();
-    builder.Write(sign.ValidityPeriod);
-    builder.EndRow();
-
-    if (!string.IsNullOrEmpty(sign.SignatureTimeStampTime) || !string.IsNullOrEmpty(sign.SigningTime))
+    if (signatures.Count == 0)
     {
-        builder.CellFormat.Borders.SetBorders(MultipleBorderTypes.Top, BorderStyle.Dashed, Color.Blue, 1);
-        builder.RowFormat.Height = new TableRowHeight(5f, HeightRule.Exact);
-        builder.InsertCell();
-        builder.InsertCell();
-        builder.EndRow();
+        // подписей нет, дорисовывать нечего
+        return;
+    }
 
-        builder.CellFormat.Borders.SetBorders(MultipleBorderTypes.Top, BorderStyle.None, Color.Blue, 1);
+    // ищем текущую последнюю секцию
+    var lastSection = document.Sections.LastOrDefault();
+    if (lastSection == null)
+    {
+        // если документ пустой, ничего не делаем
+        return;
+    }
 
-        if (!string.IsNullOrEmpty(sign.SigningTime))
+    // добавляем новую секцию с такими же настройками страницы, как и у предыдущей секции
+    var section = new Section(document)
+    {
+        PageSetup = lastSection.PageSetup.Clone()
+    };
+
+    // теперь нам нужно убедиться, что в новой секции единственная текстовая колонка,
+    section.PageSetup.TextColumns = new TextColumnCollection(1);
+
+    // и она не выводится на титульной странице
+    section.PageSetup.TitlePage = false;
+
+    for (var i = 0; i < signatures.Count; i++)
+    {
+        // если это первая подпись, то гарантируем, что новая секция будет выведена на новой странице;
+        // для последующих подписей обесспечиваем пустую строку между текущей подписбью и предыдущей
+        var newLine = new Paragraph(document, new SpecialCharacter(document, i == 0 ? SpecialCharacterType.PageBreak : SpecialCharacterType.LineBreak));
+        section.Blocks.Add(newLine);
+
+        // рисуем таблицу с подписями
+        var table = GetSignatureTable(document, signatures[i]);
+        section.Blocks.Add(table);
+    }
+
+    // добавляем новую секцию в документ
+    document.Sections.Add(section);
+}
+
+Table GetSignatureTable(DocumentCore document, Sign signature)
+{
+    // определяем число строк в таблице
+    var rowCount = 3;
+
+    if (!string.IsNullOrEmpty(signature.SigningTime))
+    {
+        rowCount++;
+    }
+    
+    if (!string.IsNullOrEmpty(signature.SignatureTimeStampTime))
+    {
+        rowCount++;
+    }
+
+    // риусем таблицу с подписью
+    var table = new Table(document);
+    
+    for (var i = 0; i < rowCount; i++)
+    {
+        switch (i)
         {
-            builder.RowFormat.Height = new TableRowHeight(18f, HeightRule.Exact);
-            builder.InsertCell();
-            builder.Write("SignationDate");
-            builder.InsertCell();
-            builder.Write(sign.SigningTime);
-            builder.EndRow();
-        }
+            case 0:
+                {
+                    AddSigner(document, table, signature);
+                    break;
+                }
 
-        if (!string.IsNullOrEmpty(sign.SignatureTimeStampTime))
-        {
-            builder.RowFormat.Height = new TableRowHeight(18f, HeightRule.Exact);
-            builder.InsertCell();
-            builder.Write("SignatureTimeStamp");
-            builder.InsertCell();
-            builder.Write(sign.SignatureTimeStampTime);
-            builder.EndRow();
+            case 1:
+                {
+                    AddCertificateSerial(document, table, signature);
+                    break;
+                }
+
+            case 2:
+                {
+                    AddCertificateValidityPeriod(document, table, signature);
+                    break;
+                }
+
+            case 3:
+                {
+                    AddSigningTimestamp(document, table, signature);
+                    break;
+                }
+
+            case 4:
+                {
+                    if (!string.IsNullOrEmpty(signature.SignatureTimeStampTime))
+                    {
+                        AddSignatureTimeStampTime(document, table, signature);
+                    }
+                    break;
+                }
         }
     }
 
-    builder.CellFormat.Borders.SetBorders(MultipleBorderTypes.Bottom, BorderStyle.Single, Color.Blue, 1);
-    builder.RowFormat.Height = new TableRowHeight(1f, HeightRule.Exact);
-    builder.InsertCell();
-    builder.InsertCell();
-    builder.EndRow();
+    // растягиваем таблицу на всю ширину секции
+    table.TableFormat.PreferredWidth = new TableWidth(100, TableWidthUnit.Percentage);
 
-    builder.EndTable();
+    return table;
+}
+
+void AddSigner(DocumentCore document, Table table, Sign signature)
+{
+    var row = new TableRow(document);
+    row.Cells.Add(GetSignerTableCell(document, MultipleBorderTypes.Left | MultipleBorderTypes.Top, "Подписано электронной подписью"));
+    row.Cells.Add(GetSignerTableCell(document, MultipleBorderTypes.Right | MultipleBorderTypes.Top, signature.Employee));
+    table.Rows.Add(row);
+}
+
+void AddCertificateSerial(DocumentCore document, Table table, Sign signature)
+{
+    var row = new TableRow(document);
+    row.Cells.Add(GetSignerTableCell(document, MultipleBorderTypes.Left, "Серийный номер сертификата"));
+    row.Cells.Add(GetSignerTableCell(document, MultipleBorderTypes.Right, signature.SerialNumber));
+    table.Rows.Add(row);
+}
+
+void AddCertificateValidityPeriod(DocumentCore document, Table table, Sign signature)
+{
+    var leftBorder = MultipleBorderTypes.Left;
+    var rightBorder = MultipleBorderTypes.Right;
+
+    if (string.IsNullOrEmpty(signature.SigningTime))
+    {
+        leftBorder |= MultipleBorderTypes.Bottom;
+        rightBorder |= MultipleBorderTypes.Bottom;
+    }
+
+    var row = new TableRow(document);
+    row.Cells.Add(GetSignerTableCell(document, leftBorder, "Период действия сертификата"));
+    row.Cells.Add(GetSignerTableCell(document, rightBorder, signature.ValidityPeriod));
+    table.Rows.Add(row);
+}
+
+void AddSigningTimestamp(DocumentCore document, Table table, Sign signature)
+{
+    var leftBorder = MultipleBorderTypes.Left | MultipleBorderTypes.Top;
+    var rightBorder = MultipleBorderTypes.Right | MultipleBorderTypes.Top;
+
+    if (string.IsNullOrEmpty(signature.SignatureTimeStampTime))
+    {
+        leftBorder |= MultipleBorderTypes.Bottom;
+        rightBorder |= MultipleBorderTypes.Bottom;
+    }
+
+    var row = new TableRow(document);
+    row.Cells.Add(GetSignerTableCell(document, leftBorder, "Штамп времени"));
+    row.Cells.Add(GetSignerTableCell(document, rightBorder, signature.SigningTime));
+    table.Rows.Add(row);
+}
+
+void AddSignatureTimeStampTime(DocumentCore document, Table table, Sign signature)
+{
+    var row = new TableRow(document);
+    row.Cells.Add(GetSignerTableCell(document, MultipleBorderTypes.Left | MultipleBorderTypes.Bottom, "Пожпись заверена"));
+    row.Cells.Add(GetSignerTableCell(document, MultipleBorderTypes.Right | MultipleBorderTypes.Bottom, signature.SignatureTimeStampTime));
+    table.Rows.Add(row);
+}
+
+TableCell GetSignerTableCell(DocumentCore document, MultipleBorderTypes borderTypes, string text)
+{
+    var block = new Paragraph(document, new Run(document, text, new CharacterFormat
+    {
+        FontColor = Color.Blue,
+        Size = DefaultFontSize
+    }));
+
+    var cell = new TableCell(document, block);
+
+    cell.CellFormat.PreferredWidth = new TableWidth(50, TableWidthUnit.Percentage);
+    cell.CellFormat.Borders.SetBorders(borderTypes, BorderStyle.Single, Color.Blue, 1);
+    cell.CellFormat.VerticalAlignment = VerticalAlignment.Center;
+    cell.CellFormat.Padding = new Padding(DefaultLeftPadding, DefaultPadding, DefaultPadding, DefaultPadding, LengthUnit.Millimeter);
+
+    return cell;
 }
