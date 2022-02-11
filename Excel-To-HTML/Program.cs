@@ -246,7 +246,7 @@ void AddSigningTimestamp(DocumentCore document, Table table, Sign signature)
 void AddSignatureTimeStampTime(DocumentCore document, Table table, Sign signature)
 {
     var row = new TableRow(document);
-    row.Cells.Add(GetSignerTableCell(document, MultipleBorderTypes.Left | MultipleBorderTypes.Bottom, "Пожпись заверена"));
+    row.Cells.Add(GetSignerTableCell(document, MultipleBorderTypes.Left | MultipleBorderTypes.Bottom, "Подпись заверена"));
     row.Cells.Add(GetSignerTableCell(document, MultipleBorderTypes.Right | MultipleBorderTypes.Bottom, signature.SignatureTimeStampTime));
     table.Rows.Add(row);
 }
