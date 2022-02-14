@@ -5,7 +5,6 @@ using SautinSoft.Document.Tables;
 const string ExcelToPdfSerialNumber = "50013243563";
 const string DocumentNetSerialNumber = "50024532950";
 const string FileName = "SampleDoc";
-const int DefaultMargin = 10;
 const double DefaultLeftPadding = 2.0;
 const double DefaultPadding = 0.5;
 const int DefaultFontSize = 12;
@@ -35,12 +34,8 @@ async Task<byte[]> ConvertToPdfAsync()
         OutputFormat = SautinSoft.ExcelToPdf.eOutputFormat.Pdf,
     };
 
-    excelToPdf.PageStyle.PageMarginLeft.mm(DefaultMargin);
-    excelToPdf.PageStyle.PageMarginTop.mm(DefaultMargin);
-    excelToPdf.PageStyle.PageMarginRight.mm(DefaultMargin);
-    excelToPdf.PageStyle.PageMarginBottom.mm(DefaultMargin);
     excelToPdf.PageStyle.PageOrientation.Landscape();
-    excelToPdf.PageStyle.PageScale.Auto();
+    excelToPdf.PageStyle.PageScale.FitByWidth();
     excelToPdf.PageStyle.PageSize.A4();
 
     var pdf = excelToPdf.ConvertBytes(excel);
@@ -189,6 +184,7 @@ Table GetSignatureTable(DocumentCore document, Sign signature)
 
     // растягиваем таблицу на всю ширину секции
     table.TableFormat.PreferredWidth = new TableWidth(100, TableWidthUnit.Percentage);
+    table.TableFormat.Alignment = HorizontalAlignment.Center;
 
     return table;
 }
