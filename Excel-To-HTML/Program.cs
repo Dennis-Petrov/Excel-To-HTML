@@ -192,7 +192,7 @@ Table GetInnerTable(DocumentCore document, Sign signature)
             1 => GetInnerTableRowOrDefault(document, "Подписано электронной подписью", signature.Employee),
             2 => GetInnerTableRowOrDefault(document, "Серийный номер сертификата", signature.SerialNumber),
             3 => GetInnerTableRowOrDefault(document, "Период действия сертификата", signature.ValidityPeriod),
-            4 => GetInnerTableRowOrDefault(document, "Штамп времени", signature.SigningTime),
+            4 => GetInnerTableRowOrDefault(document, "Штамп времени", signature.SigningTime, MultipleBorderTypes.Top),
             5 => GetInnerTableRowOrDefault(document, "Подпись заверена", signature.SignatureTimeStampTime),
             _ => throw new NotImplementedException()
         };
