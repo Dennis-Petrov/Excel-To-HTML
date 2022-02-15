@@ -5,9 +5,12 @@ using SautinSoft.Document.Tables;
 const string ExcelToPdfSerialNumber = "50013243563";
 const string DocumentNetSerialNumber = "50024532950";
 const string FileName = "SampleDoc";
-const double DefaultLeftPadding = 2.0;
-const double DefaultPadding = 0.5;
+const double DefaultInnerXPadding = 0.0;
+const double DefaultInnerYPadding = 1.0;
+const double DefaultFrameXPadding = 10.0;
+const double DefaultFrameYPadding = 8.0;
 const int DefaultFontSize = 12;
+const int DefaultRowCount = 12;
 
 DocumentCore.Serial = DocumentNetSerialNumber;
 
@@ -127,127 +130,100 @@ void AddSignature2(DocumentCore document, IReadOnlyList<Sign> signatures)
 
 Table GetSignatureTable(DocumentCore document, Sign signature)
 {
-    // определяем число строк в таблице
-    var rowCount = 3;
+    // рисуем таблицу-рамку
+    var frameTable = GetFrameTable(document);
 
-    if (!string.IsNullOrEmpty(signature.SigningTime))
-    {
-        rowCount++;
-    }
-    
-    if (!string.IsNullOrEmpty(signature.SignatureTimeStampTime))
-    {
-        rowCount++;
-    }
+    // риусем внутреннюю таблицу
+    var innerTable = GetInnerTable(document, signature);
 
-    // риусем таблицу с подписью
+    // вставляем внутреннюю таблицу в рамку
+    frameTable.Rows[0].Cells[0].Blocks.Add(innerTable);
+
+    return frameTable;
+}
+
+Table GetFrameTable(DocumentCore document)
+{
+    // рисуем таблицу-рамку из одной ячейки
     var table = new Table(document);
-    
-    for (var i = 0; i < rowCount; i++)
-    {
-        switch (i)
-        {
-            case 0:
-                {
-                    AddSigner(document, table, signature);
-                    break;
-                }
+    var row = new TableRow(document);
+    var cell = new TableCell(document);
 
-            case 1:
-                {
-                    AddCertificateSerial(document, table, signature);
-                    break;
-                }
+    // у ячейки будут внешние границы, и она будет занимать всю ширину таблицы
+    cell.CellFormat.PreferredWidth = new TableWidth(100, TableWidthUnit.Percentage);
+    cell.CellFormat.Borders.SetBorders(MultipleBorderTypes.Outside, BorderStyle.Single, Color.Blue, 1);
+    cell.CellFormat.VerticalAlignment = VerticalAlignment.Center;
+    cell.CellFormat.Padding = new Padding(DefaultFrameXPadding, DefaultFrameYPadding, DefaultFrameXPadding, DefaultFrameYPadding, LengthUnit.Millimeter);
 
-            case 2:
-                {
-                    AddCertificateValidityPeriod(document, table, signature);
-                    break;
-                }
+    row.Cells.Add(cell);
+    table.Rows.Add(row);
 
-            case 3:
-                {
-                    AddSigningTimestamp(document, table, signature);
-                    break;
-                }
-
-            case 4:
-                {
-                    if (!string.IsNullOrEmpty(signature.SignatureTimeStampTime))
-                    {
-                        AddSignatureTimeStampTime(document, table, signature);
-                    }
-                    break;
-                }
-        }
-    }
-
-    // растягиваем таблицу на всю ширину секции
+    // растягиваем таблицу на всю ширину родительской секции
     table.TableFormat.PreferredWidth = new TableWidth(100, TableWidthUnit.Percentage);
     table.TableFormat.Alignment = HorizontalAlignment.Center;
 
     return table;
 }
 
-void AddSigner(DocumentCore document, Table table, Sign signature)
+Table GetInnerTable(DocumentCore document, Sign signature)
 {
-    var row = new TableRow(document);
-    row.Cells.Add(GetSignerTableCell(document, MultipleBorderTypes.Left | MultipleBorderTypes.Top, "Подписано электронной подписью"));
-    row.Cells.Add(GetSignerTableCell(document, MultipleBorderTypes.Right | MultipleBorderTypes.Top, signature.Employee));
-    table.Rows.Add(row);
-}
+    // определяем число строк в таблице
+    var rowCount = DefaultRowCount;
 
-void AddCertificateSerial(DocumentCore document, Table table, Sign signature)
-{
-    var row = new TableRow(document);
-    row.Cells.Add(GetSignerTableCell(document, MultipleBorderTypes.Left, "Серийный номер сертификата"));
-    row.Cells.Add(GetSignerTableCell(document, MultipleBorderTypes.Right, signature.SerialNumber));
-    table.Rows.Add(row);
-}
-
-void AddCertificateValidityPeriod(DocumentCore document, Table table, Sign signature)
-{
-    var leftBorder = MultipleBorderTypes.Left;
-    var rightBorder = MultipleBorderTypes.Right;
-
-    if (string.IsNullOrEmpty(signature.SigningTime))
+    if (!string.IsNullOrEmpty(signature.SigningTime))
     {
-        leftBorder |= MultipleBorderTypes.Bottom;
-        rightBorder |= MultipleBorderTypes.Bottom;
+        // строка для вывода времени подписания
+        rowCount++;
+    }
+
+    if (!string.IsNullOrEmpty(signature.SignatureTimeStampTime))
+    {
+        // строка для вывода штампа времени, заверающего время подписания
+        rowCount++;
+    }
+
+    // рисуем таблицу
+    var table = new Table(document);
+
+    for (var i = 0; i < rowCount; i++)
+    {
+        var row = i switch
+        {
+            1 => GetInnerTableRowOrDefault(document, "Подписано электронной подписью", signature.Employee),
+            2 => GetInnerTableRowOrDefault(document, "Серийный номер сертификата", signature.SerialNumber),
+            3 => GetInnerTableRowOrDefault(document, "Период действия сертификата", signature.ValidityPeriod),
+            4 => GetInnerTableRowOrDefault(document, "Штамп времени", signature.SigningTime),
+            5 => GetInnerTableRowOrDefault(document, "Подпись заверена", signature.SignatureTimeStampTime),
+            _ => throw new NotImplementedException()
+        };
+
+        if (row != null)
+        {
+            table.Rows.Add(row);
+        }
+    }
+
+    // растягиваем таблицу до 90% родительской ячейки
+    table.TableFormat.PreferredWidth = new TableWidth(90, TableWidthUnit.Percentage);
+    table.TableFormat.Alignment = HorizontalAlignment.Center;
+
+    return table;
+}
+
+TableRow? GetInnerTableRowOrDefault(DocumentCore document, string left, string right, MultipleBorderTypes borderTypes = MultipleBorderTypes.None)
+{
+    if (string.IsNullOrEmpty(right))
+    {
+        return null;
     }
 
     var row = new TableRow(document);
-    row.Cells.Add(GetSignerTableCell(document, leftBorder, "Период действия сертификата"));
-    row.Cells.Add(GetSignerTableCell(document, rightBorder, signature.ValidityPeriod));
-    table.Rows.Add(row);
+    row.Cells.Add(GetInnerTableCell(document, borderTypes, left));
+    row.Cells.Add(GetInnerTableCell(document, borderTypes, right));
+    return row;
 }
 
-void AddSigningTimestamp(DocumentCore document, Table table, Sign signature)
-{
-    var leftBorder = MultipleBorderTypes.Left | MultipleBorderTypes.Top;
-    var rightBorder = MultipleBorderTypes.Right | MultipleBorderTypes.Top;
-
-    if (string.IsNullOrEmpty(signature.SignatureTimeStampTime))
-    {
-        leftBorder |= MultipleBorderTypes.Bottom;
-        rightBorder |= MultipleBorderTypes.Bottom;
-    }
-
-    var row = new TableRow(document);
-    row.Cells.Add(GetSignerTableCell(document, leftBorder, "Штамп времени"));
-    row.Cells.Add(GetSignerTableCell(document, rightBorder, signature.SigningTime));
-    table.Rows.Add(row);
-}
-
-void AddSignatureTimeStampTime(DocumentCore document, Table table, Sign signature)
-{
-    var row = new TableRow(document);
-    row.Cells.Add(GetSignerTableCell(document, MultipleBorderTypes.Left | MultipleBorderTypes.Bottom, "Подпись заверена"));
-    row.Cells.Add(GetSignerTableCell(document, MultipleBorderTypes.Right | MultipleBorderTypes.Bottom, signature.SignatureTimeStampTime));
-    table.Rows.Add(row);
-}
-
-TableCell GetSignerTableCell(DocumentCore document, MultipleBorderTypes borderTypes, string text)
+TableCell GetInnerTableCell(DocumentCore document, MultipleBorderTypes borderTypes, string text)
 {
     var block = new Paragraph(document, new Run(document, text, new CharacterFormat
     {
@@ -258,9 +234,9 @@ TableCell GetSignerTableCell(DocumentCore document, MultipleBorderTypes borderTy
     var cell = new TableCell(document, block);
 
     cell.CellFormat.PreferredWidth = new TableWidth(50, TableWidthUnit.Percentage);
-    cell.CellFormat.Borders.SetBorders(borderTypes, BorderStyle.Single, Color.Blue, 1);
+    cell.CellFormat.Borders.Add(borderTypes, BorderStyle.Single, Color.Blue, 1.0);
     cell.CellFormat.VerticalAlignment = VerticalAlignment.Center;
-    cell.CellFormat.Padding = new Padding(DefaultLeftPadding, DefaultPadding, DefaultPadding, DefaultPadding, LengthUnit.Millimeter);
+    cell.CellFormat.Padding = new Padding(DefaultInnerXPadding, DefaultInnerYPadding, DefaultInnerXPadding, DefaultInnerYPadding, LengthUnit.Millimeter);
 
     return cell;
 }
